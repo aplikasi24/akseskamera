@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deteksi Kendaraan Pintar</title>
+  <!-- Load TensorFlow.js dan COCO-SSD -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background-color: #1a1a2e; color: #fff; margin: 0; padding: 15px;}
+    .video-container { position: relative; display: inline-block; max-width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 16px rgba(0,0,0,0.5);}
+    video { width: 100%; max-width: 640px; display: block; }
+    canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+    #status { padding: 15px; font-size: 16px; font-weight: bold; color: #4ade80; background: #16213e; border-radius: 8px; margin-bottom: 15px; }
+    .warning { color: #f87171 !important; }
+  </style>
+</head>
+<body>
+
+  <h2>Kamera Pemantau Kendaraan</h2>
+  <div id="status">Memulai aplikasi...</div>
+  
+  <div class="video-container">
+    <video id="webcam" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <script>
+    // =========================================================
+    // URL WEB APP GOOGLE APPS SCRIPT ANDA SUDAH DIMASUKKAN DI SINI:
+    // =========================================================
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzfAeKRVq8fZ6Lv0po4WQsp6tLkzBIWikxvwiuXoYmpwZwV-azYkghAgSpD9dPdgzg/exec"; 
+    
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const statusDiv = document.getElementById('status');
+    
+    let model;
+    let vehicleCurrentlyInFrame = false;
+    let emptyFrameCount = 0;
+    let isUploading = false; // Mencegah upload dobel saat proses masih berjalan
+
+    // Target objek bahasa Inggris dari AI
+    const validVehicles = ['car', 'truck', 'bus', 'motorcycle'];
+
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' } // Kamera belakang
+        });
+        video.srcObject = stream;
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            resolve(video);
+          };
+        });
+      } catch (err) {
+        statusDiv.innerText = "Gagal mengakses kamera. Izinkan akses kamera di browser.";
+        statusDiv.classList.add('warning');
+      }
+    }
+
+    async function main() {
+      if (APPS_SCRIPT_URL === "MASUKKAN_URL_WEB_APP_KAMU_DISINI") {
+        statusDiv.innerText = "ERROR: Silakan edit file index.html dan masukkan APPS_SCRIPT_URL terlebih dahulu.";
+        statusDiv.classList.add('warning');
+        return;
+      }
+
+      statusDiv.innerText = "Memuat AI Model (Tunggu sebentar)...";
+      model = await cocoSsd.load();
+      statusDiv.innerText = "Model AI siap! Menghubungkan kamera...";
+      
+      await setupCamera();
+      statusDiv.innerText = "Mendeteksi Kendaraan Lewat...";
+      detectFrame();
+    }
+
+    function detectFrame() {
+      model.detect(video).then(predictions => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let detectedVehicleType = null;
+
+        predictions.forEach(prediction => {
+          const label = prediction.class;
+          
+          if (validVehicles.includes(label)) {
+            detectedVehicleType = label; // Simpan jenis kendaraan
+            
+            // Gambar Kotak Penanda
+            ctx.beginPath();
+            ctx.rect(prediction.bbox[0], prediction.bbox[1], prediction.bbox[2], prediction.bbox[3]);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#00ff00';
+            ctx.fillStyle = '#00ff00';
+            ctx.stroke();
+            
+            // Teks Label
+            ctx.font = '18px Arial';
+            ctx.fillText(label.toUpperCase(), prediction.bbox[0] + 5, prediction.bbox[1] > 20 ? prediction.bbox[1] - 5 : 20);
+          }
+        });
+
+        // Logika Presence Detection (Mendeteksi setiap kendaraan baru yang lewat)
+        if (detectedVehicleType) {
+          emptyFrameCount = 0;
+          
+          if (!vehicleCurrentlyInFrame && !isUploading) {
+            vehicleCurrentlyInFrame = true;
+            statusDiv.innerText = "Merekam: " + detectedVehicleType.toUpperCase();
+            captureAndUpload(detectedVehicleType);
+          }
+        } else {
+          emptyFrameCount++;
+          // Reset jika frame kosong selama sekitar 0.5 detik (15 frame)
+          if (emptyFrameCount > 15) {
+            vehicleCurrentlyInFrame = false; 
+            if(!isUploading) statusDiv.innerText = "Mendeteksi Kendaraan Lewat...";
+          }
+        }
+
+        // Looping terus menerus
+        requestAnimationFrame(detectFrame); 
+      });
+    }
+
+    async function captureAndUpload(vehicleType) {
+      isUploading = true;
+      
+      // Menggambar frame ke kanvas lalu diconvert ke Base64 (Teks)
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const base64Image = canvas.toDataURL('image/png');
+
+      // Siapkan paket data untuk dikirim ke Google Apps Script
+      const payload = {
+        image: base64Image,
+        type: vehicleType
+      };
+
+      try {
+        // Menggunakan fetch API dengan metode POST
+        // Content-type 'text/plain' digunakan untuk menghindari blokir CORS Preflight dari browser
+        const response = await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8', 
+          }
+        });
+        
+        const result = await response.json();
+        console.log("Database response:", result);
+        statusDiv.innerText = "Data tersimpan! Kembali memantau...";
+        
+      } catch (error) {
+        console.error("Gagal mengirim:", error);
+        statusDiv.innerText = "Gagal menyimpan ke database.";
+      }
+
+      // Beri jeda sedikit sebelum mengizinkan upload kendaraan berikutnya
+      setTimeout(() => {
+        isUploading = false;
+      }, 1000);
+    }
+
+    // Jalankan program
+    main();
+  </script>
+</body>
+</html>
