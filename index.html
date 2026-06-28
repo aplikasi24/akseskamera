@@ -38,12 +38,12 @@
     const statusDiv = document.getElementById('status');
     
     let model;
-    let vehicleCurrentlyInFrame = false;
-    let emptyFrameCount = 0;
+    let lastCaptureTime = 0;
+    const CAPTURE_COOLDOWN = 3000; // Jeda 3 detik (3000 ms) untuk menangkap kendaraan beruntun
     let isUploading = false; // Mencegah upload dobel saat proses masih berjalan
 
-    // Target objek bahasa Inggris dari AI
-    const validVehicles = ['car', 'truck', 'bus', 'motorcycle'];
+    // Target objek bahasa Inggris dari AI (Tambahkan 'person' jika ingin mendeteksi orang)
+    const validVehicles = ['car', 'truck', 'bus', 'motorcycle', 'bicycle'];
 
     async function setupCamera() {
       try {
@@ -105,22 +105,19 @@
           }
         });
 
-        // Logika Presence Detection (Mendeteksi setiap kendaraan baru yang lewat)
+        // Logika Baru: Menangkap Semua Kendaraan (Termasuk yang beruntun/macet)
         if (detectedVehicleType) {
-          emptyFrameCount = 0;
+          const currentTime = Date.now();
           
-          if (!vehicleCurrentlyInFrame && !isUploading) {
-            vehicleCurrentlyInFrame = true;
+          // Jika ada kendaraan DAN sudah lewat 3 detik dari foto terakhir DAN tidak sedang upload
+          if ((currentTime - lastCaptureTime > CAPTURE_COOLDOWN) && !isUploading) {
+            lastCaptureTime = currentTime;
             statusDiv.innerText = "Merekam: " + detectedVehicleType.toUpperCase();
             captureAndUpload(detectedVehicleType);
           }
         } else {
-          emptyFrameCount++;
-          // Reset jika frame kosong selama sekitar 0.5 detik (15 frame)
-          if (emptyFrameCount > 15) {
-            vehicleCurrentlyInFrame = false; 
-            if(!isUploading) statusDiv.innerText = "Mendeteksi Kendaraan Lewat...";
-          }
+          // Jika layar kosong
+          if(!isUploading) statusDiv.innerText = "Mendeteksi Kendaraan Lewat...";
         }
 
         // Looping terus menerus
